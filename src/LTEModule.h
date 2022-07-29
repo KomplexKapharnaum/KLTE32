@@ -414,9 +414,8 @@ bool sendSMS(String to, String msg, String *value = NULL)
 {
   bool res = false;
 
-  LTE_cmd("AT+CMGS=\""+to+"\"", NULL, kPARTIAL_MT, 0, 10);
-  LTE_cmd(msg, NULL, kPARTIAL_MT, 0, 100);
-  res = LTE_cmd("\x1A", value, kQUERY_MT);
+  LTE_cmd("AT+CMGS=\""+to+"\"", NULL, kPARTIAL_MT, 0, 100);
+  res = LTE_cmd(msg+"\x1A", value, kQUERY_MT);
 
   if (!res || !value->startsWith("+CMGS")) return false;
   return true;

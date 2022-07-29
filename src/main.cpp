@@ -10,9 +10,6 @@ TFTTerminal terminal(&TerminalBuff);
 
 String readstr;
 
-const bool UNICODE_MODE = true;
-
-
 
 void setup() 
 {
@@ -71,13 +68,13 @@ void setup()
 
     // SMS UNICODE
     terminal.print("SMS unicode ");
-    if (UNICODE_MODE)   terminal.println( LTE_cmd("AT+CSCS=\"UCS2\"") ? "OK" : "ERROR" );       
-    else                terminal.println( LTE_cmd("AT+CSCS=\"IRA\"") ? "OK" : "ERROR" );
+    terminal.println( LTE_cmd("AT+CSCS=\"UCS2\"") ? "OK" : "ERROR" );       
+    //terminal.println( LTE_cmd("AT+CSCS=\"IRA\"") ? "OK" : "ERROR" );
 
     // SMS MODE
     terminal.print("SMS mode ");
-    if (UNICODE_MODE)   terminal.println( LTE_cmd("AT+CSMP=17,168,0,8") ? "OK" : "ERROR" );       
-    else                terminal.println( LTE_cmd("AT+CSMP=17,168,0,0") ? "OK" : "ERROR" ); 
+    terminal.println( LTE_cmd("AT+CSMP=17,168,0,8") ? "OK" : "ERROR" );       
+    //terminal.println( LTE_cmd("AT+CSMP=17,168,0,0") ? "OK" : "ERROR" ); 
 
     // SMS NOTIF
     terminal.print("SMS disable push notification ");
@@ -118,7 +115,7 @@ void loop()
     if (M5.BtnB.wasPressed()) 
     {
         terminal.print("Send SMS0 ");
-        terminal.println( sendSMS( string2hex("0675471820") , 0, &readstr) ? readstr : "ERROR" );   // D83EDD50
+        terminal.println( sendSMS( string2hex("+33675471820") , 0, &readstr) ? readstr : "ERROR" );   // D83EDD50
     }
 
     // Get RSSI
@@ -156,8 +153,8 @@ void loop()
             terminal.println( hex2string(msg.msg) );
 
             // Kick Back
-            terminal.print("-> answer ");
-            terminal.println( sendSMS(msg.from, string2hex("Loud and clear,\nmy dude"), &readstr) ? readstr : "ERROR" ); 
+            // terminal.print("-> answer ");
+            // terminal.println( sendSMS(msg.from, string2hex("Loud and clear,\nmy dude"), &readstr) ? readstr : "ERROR" ); 
         }
            
     } 
