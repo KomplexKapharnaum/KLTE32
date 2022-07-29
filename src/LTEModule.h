@@ -5,7 +5,10 @@
 
 SemaphoreHandle_t command_list_samap;
 SemaphoreHandle_t sync_cmd_lock;
+SemaphoreHandle_t partial_lock;
 uint8_t restate;
+
+Preferences storage;
 
 typedef enum {
     kQUERY_MO = 0,
@@ -49,23 +52,20 @@ struct SMS {
     String msg;
     String from;
     String date;
-    String time;
 };
 
 using namespace std;
 vector<ATCommand> serial_at;
 vector<SMS> new_sms;
 String zmmi_str;
-bool UNIMODE = false;
 
 void LTEModuleTask(void* arg);
 void LTE_smsTask(void* arg);
 void AddMsg(String str, uint8_t type, uint16_t sendcount, uint16_t sendtime);
 
 
-void LTEModule_init(int rx, int tx, bool enable_unicode = false)
+void LTEModule_init(int rx, int tx)
 {
-  UNIMODE = enable_unicode;
 
   Serial2.begin(115200, SERIAL_8N1, rx, tx);
 
@@ -85,6 +85,8 @@ void LTEModule_init(int rx, int tx, bool enable_unicode = false)
   xSemaphoreGive(command_list_samap);
   xTaskCreate(LTEModuleTask, "LTEModuleTask", 1024 * 2, (void*)0, 4, NULL);
 
+    // Load NVS
+    storage.begin("KLTE");
 }
 
 
@@ -107,28 +109,46 @@ void LTEModuleTask(void* arg)
             } else if ((restr.indexOf("OK") != -1) ||
                        (restr.indexOf("ERROR") != -1)) 
             {
-                Serial.print("RCV: ");
-                Serial.print(restr);
                 if (restr.indexOf("OK") != -1) {
                     if ((serial_at[0].command_type == kACTION_MO) ||
                         (serial_at[0].command_type == kASSIGN_MO)) {
                         serial_at.erase(serial_at.begin());
                         Serial.printf("erase now %d\n", serial_at.size());
                     } else {
-                        restr.replace("\nOK", "");
-                        restr.trim();
+                        restr.replace("\r", "");
+                        restr.replace("\n\nOK", "\n+END");
+                        restr.replace("\nOK", "\n+END");
                         restr = restr.substring(restr.indexOf("+"), restr.length());
-                        Serial.print("FINAL: ");
-                        Serial.println(restr);
-                        // String extra = "";
-                        // if (restr.startsWith("+CMGR") || restr.startsWith("+CMGL")) {
-                        //     extra = restr.substring(restr.indexOf("\n")+1, restr.length());
-                        //     extra = extra.substring(0, extra.indexOf("\n"));
-                        //     extra.trim();
-                        // }
-                        // restr = restr.substring(0, restr.indexOf("\n"));
-                        // restr.trim();                        
-                        // if (extra != "") restr += ",\""+extra+"\"";
+                        restr.trim();
+
+                        // Serial.print("PRE: ");
+                        // Serial.println(restr);    
+
+                        // Pack extra new line to command line with "
+                        int pos = 0;
+                        bool lastPosPlus = true;
+                        while(1) {
+                            pos = restr.indexOf("\n", pos);
+                            if (pos < 0) break;
+                            if (restr.charAt(pos+1) == '+') 
+                            {
+                                if (!lastPosPlus) restr = restr.substring(0,pos)+"\""+restr.substring(pos,restr.length());
+                                lastPosPlus = true;
+                            }
+                            else if (lastPosPlus)
+                            {
+                                restr = restr.substring(0,pos)+",\""+restr.substring(pos+1,restr.length());
+                                lastPosPlus = false;
+                            }
+                            pos++;
+                        }
+
+                        restr.replace("+END", "");
+                        restr.trim();
+
+                        // Serial.println("PARSED: ");
+                        // Serial.println(restr);
+
                         serial_at[0].read_str = restr;
                         serial_at[0].state    = kWaitforRead;
                     }
@@ -136,6 +156,8 @@ void LTEModuleTask(void* arg)
                     serial_at[0].state = kErrorReError;
                 } else {
                 }
+                Serial.println("RCV: ");
+                Serial.println(restr);
                 restr.clear();
             }
         }
@@ -268,46 +290,98 @@ bool LTE_cmd(String str, String *value = NULL, uint8_t type = kQUERY_MT, uint16_
     return ret;
 }
 
-
-String stringAt(String Str, int index) 
-{   
-    Str = Str.substring(Str.indexOf(": ")+2, Str.length());
-
-    int count = 0;
-    while( count < index && Str.length() > 0) 
-    {
-        Str = Str.substring(Str.indexOf(",")+1, Str.length());
-        count++;
-    }
-
-    int end = Str.indexOf(",");
-    if (end < 0) end = Str.length();
-    Str = Str.substring(0, end);
-
-    if (Str.charAt(0) == '"')
-        Str = Str.substring(1, Str.length());
+int lineCount(String Str) 
+{
+    if (Str.length() > 0) Str += "\n";
     
-    if (Str.charAt(Str.length()-1) == '"')
-        Str = Str.substring(0, Str.length()-1);
+    int lineCount = 0;
+    bool insideQuotes = false;
 
-    return Str;
+    // look for \n but outside double quotes
+    for (int k=0; k<Str.length(); k++) {
+        if (Str[k] == '"') insideQuotes = !insideQuotes;
+        if (Str[k] == '\n' && !insideQuotes) lineCount++;
+    }
+    return lineCount;
 }
 
-int intAt(String Str, int index) 
+
+String lineAt(String Str, int index)
+{
+    Str += "\n";
+
+    int start = 0;
+    int end = -1;
+    bool insideQuotes = false;
+    int scannedIndex = -1;
+
+    // look for \n but outside double quotes
+    for (int k=0; k<Str.length(); k++) {
+        if (Str[k] == '"') insideQuotes = !insideQuotes;
+        if (Str[k] == '\n' && !insideQuotes) {
+            start = end+1;
+            end = k;
+            scannedIndex++;
+        }
+        if (scannedIndex == index) {
+            return Str.substring(start, end);
+        }
+    }
+    return "";
+}
+
+
+String lineStartingWith(String Str, String start)
+{
+    for(int k=0; k<lineCount(Str); k++) {
+        String line = lineAt(Str, k);
+        if (line.startsWith(start)) return line; 
+    }
+    return "";
+}
+
+
+String argAt(String Str, int index, int line = 0) 
 {   
-    String sStr = stringAt(Str, index);
-    if (Str.length() > 0) return sStr.toInt();
-    return -1;
+    Str = lineAt(Str, line);
+    Str = Str.substring(Str.indexOf(": ")+2, Str.length())+",";
+
+    int start = 0;
+    int end = -1;
+    bool insideQuotes = false;
+    int scannedIndex = -1;
+
+    // look for , but outside double quotes
+    for (int k=0; k<Str.length(); k++) {
+        if (Str[k] == '"') insideQuotes = !insideQuotes;
+        if (Str[k] == ',' && !insideQuotes) {
+            start = end+1;
+            end = k;
+            scannedIndex++;
+        }
+        if (scannedIndex == index) {
+            String s = Str.substring(start, end);
+            if (s.charAt(0) == '"') s = s.substring(1, s.length());
+            if (s.charAt(s.length()-1) == '"') s = s.substring(0, s.length()-1);
+            return s;
+        }
+    }
+    return "";
+}
+
+String argAt(String Str, int index, String lineStart) 
+{   
+    String line = lineStartingWith(Str, lineStart);
+    return argAt(line, index);
 }
 
 String string2hex(String str)
 {
   char out[str.length()*4];
   for (int i = 0; i < str.length(); i++)  {
-    sprintf(&out[i*4], "%04x", str.charAt(i));
+    sprintf(&out[i*4], "%04X", str.charAt(i));
   };
   String ret = String(out);
-  ret.toUpperCase(); 
   return ret;
 }
 
@@ -319,8 +393,6 @@ String hex2string(String str)
 
   char temp[5] = {0};
   int index = 0;
-
-    Serial.println(str.length());
 
   for (int i = 0; i < str.length(); i += 4) {
     strncpy(temp, &hex[i], 4);
@@ -341,58 +413,54 @@ String hex2string(String str)
 bool sendSMS(String to, String msg, String *value = NULL)
 {
   bool res = false;
-  
-  if (UNIMODE) {
-    to = string2hex(to);
-    msg = string2hex(msg);
-  }
 
   LTE_cmd("AT+CMGS=\""+to+"\"", NULL, kPARTIAL_MT, 0, 10);
-  res = LTE_cmd(msg+"\x1A", value, kQUERY_MT, 0, 100);
+  LTE_cmd(msg, NULL, kPARTIAL_MT, 0, 100);
+  res = LTE_cmd("\x1A", value, kQUERY_MT);
 
   if (!res || !value->startsWith("+CMGS")) return false;
   return true;
 }
 
-void LTE_smsTask(void* arg) 
+bool sendSMS(String to, int mem, String *value = NULL)
+{
+  String msg = storage.getString( ("SMS"+String(mem)).c_str() , "?");
+  return sendSMS(to, msg, value);
+}
+
+
+void storeSMS(String msg, int mem)   
+{
+  storage.putString( ("SMS"+String(mem)).c_str() , msg);
+}
+
+bool pullSMS() 
 {   
     String newMsg;
     bool docleanup;
+    int count;
     
-    while (1) 
-    {
-        LTE_cmd("AT+CMGL=\"REC UNREAD\"", &newMsg);
+    LTE_cmd("AT+CMGL=\"REC UNREAD\"", &newMsg);
 
-        docleanup = false; 
-        while (newMsg != "") 
-        { 
-            // Serial.println("-NEW SMS-");
-            // Serial.println(newMsg);
+    count = lineCount(newMsg);
+    for (int k=0; k<count; k++) {
+        String line = lineAt(newMsg, k);
+        
+        // Serial.printf("-NEW SMS %d: ", k);
+        // Serial.println(line);
 
-            struct SMS message;
-            message.msg  = stringAt(newMsg, 6);
-            message.from = stringAt(newMsg, 2);
-            message.date = stringAt(newMsg, 4);
-            message.time = stringAt(newMsg, 5);
+        struct SMS message;
+        message.msg  = argAt(line, 5);
+        message.from = argAt(line, 2);
+        message.date = argAt(line, 4);
 
-            if (UNIMODE) {
-                message.msg = hex2string(message.msg);
-                message.from = hex2string(message.from); 
-            }
+        // Serial.println(message.msg);
+        new_sms.push_back(message);
+    } 
 
-            // Serial.println(message.msg);
-            new_sms.push_back(message);
+    if (count > 0) LTE_cmd("AT+CMGD=,3");
 
-            LTE_cmd("AT+CMGD="+stringAt(newMsg, 0));
-            LTE_cmd("AT+CMGL=\"REC READ\"", &newMsg);
-
-            docleanup = true;
-        }
-
-        if (docleanup) LTE_cmd("AT+CMGD=,3");
-
-        delay(100);
-    }
+    return (count > 0);
 }
 
 bool recvSMS( struct SMS* message)
@@ -401,7 +469,6 @@ bool recvSMS( struct SMS* message)
         message->msg  = String(new_sms[0].msg);
         message->from = String(new_sms[0].from);
         message->date = String(new_sms[0].date);
-        message->time = String(new_sms[0].time);
         new_sms.erase(new_sms.begin());
         return true;
     }
