@@ -4,12 +4,15 @@
 #include "LTEModule.h"
 #include "TFTTerminal.h"
 
+#include <ArduinoJson.h>
+
 TFT_eSprite Disbuff      = TFT_eSprite(&M5.Lcd);
 TFT_eSprite TerminalBuff = TFT_eSprite(&M5.Lcd);
 TFTTerminal terminal(&TerminalBuff);
 
 String readstr;
 
+String URLSMSAPI = "https://relay.kxkm.net/relay/api/multisms";
 
 void setup() 
 {
@@ -62,6 +65,14 @@ void setup()
         terminal.print('.');
     }
 
+    // CHECK OPERATOR
+    // terminal.print("Network: ");
+    // terminal.println( LTE_cmd("AT+COPS?", &readstr) ? stringAt(readstr, 2) : "ERROR" );
+
+    // CHECK NUMBER
+    // terminal.print("My Number: ");
+    // terminal.println( LTE_cmd("AT+CNUM", &readstr) ? stringAt(readstr, 1) : "ERROR" );
+
     // SMS TEXT
     terminal.print("SMS mode text ");
     terminal.println( LTE_cmd("AT+CMGF=1") ? "OK" : "ERROR" );
@@ -84,14 +95,26 @@ void setup()
     // terminal.print("SMS clear old messages ");
     // terminal.println( LTE_cmd("AT+CMGD=,3") ? "OK" : "ERROR" ); 
 
+    delay(2000);
 
-    // CHECK OPERATOR
-    // terminal.print("Network: ");
-    // terminal.println( LTE_cmd("AT+COPS?", &readstr) ? stringAt(readstr, 2) : "ERROR" );
+    // terminal.print("4G GPRS network ");
+    // terminal.println( LTE_cmd("AT+CGACT?") ? "OK" : "ERROR" );
 
-    // CHECK NUMBER
-    // terminal.print("My Number: ");
-    // terminal.println( LTE_cmd("AT+CNUM", &readstr) ? stringAt(readstr, 1) : "ERROR" );
+    // Local IP
+    terminal.print("4G APN ");
+    LTE_cmd("AT+CGDCONT=1,\"IP\",\"free\"");
+
+    // Attach NEtwork
+    terminal.print("4G Attach NEtwork ");
+    terminal.println( LTE_cmd("AT+CGATT=1") ? "OK" : "ERROR" );
+
+    // GPRS
+    terminal.print("4G GPRS network ");
+    terminal.println( LTE_cmd("AT+CGACT=1,1") ? "OK" : "ERROR" );
+
+    // Con UP
+
+    terminal.println("READY !");
 
 }
 
@@ -129,35 +152,59 @@ void loop()
     
 
     // PROCESS RECEIVED MESSAGE
-    struct SMS msg;
-    while ( recvSMS(&msg) )
+    if ( receivedSMS() ) 
     {
-            //002B0030   // 002B003000200041
+        // String data = "{\"from\": \"+33675471820\", \"text\": \"Yeah\"}";
 
-        String head = hex2string( msg.msg.substring(0, 24) );
-        head.trim();
-        head.toUpperCase();
+        DynamicJsonDocument data( 200*receivedSMS() );
 
-        // Store Message
-        if (head.startsWith("+SMS")) {
-            int mem = head.substring(4, 6).toInt();
-            String msgstore = msg.msg.substring(24, msg.msg.length());
-
-            Serial.println("Storing "+String(mem)+" : "+hex2string(msgstore));
-            storeSMS(msgstore, mem);
-        }
-        else 
+        struct SMS msg;
+        int count = 0;
+        while ( recvSMS(&msg) )
         {
-            terminal.print("New MSG from ");    
-            terminal.println( hex2string(msg.from) );    
-            terminal.println( hex2string(msg.msg) );
+                //002B0030   // 002B003000200041
 
-            // Kick Back
-            // terminal.print("-> answer ");
-            // terminal.println( sendSMS(msg.from, string2hex("Loud and clear,\nmy dude"), &readstr) ? readstr : "ERROR" ); 
-        }
-           
-    } 
+            String head = hex2string( msg.msg.substring(0, 24) );
+            head.trim();
+            head.toUpperCase();
+
+            // Store Message
+            if (head.startsWith("+SMS")) {
+                int mem = head.substring(4, 6).toInt();
+                String msgstore = msg.msg.substring(24, msg.msg.length());
+
+                Serial.println("Storing "+String(mem)+" : "+hex2string(msgstore));
+                storeSMS(msgstore, mem);
+            }
+            else 
+            {
+                terminal.print("New MSG from ");    
+                terminal.println( hex2string(msg.from) );    
+                terminal.println( hex2string(msg.msg) );
+
+                // Forward to Relay
+                data["sms"][count]["from"] = hex2string(msg.from);
+                data["sms"][count]["text"] = hex2string(msg.msg);
+
+                // LTE_cmd("AT+HTTPINIT");
+                // LTE_cmd("AT+HTTPPARA=\"URL\",\"https://relay.kxkm.net/relay/api/sms\"");
+                // LTE_cmd("AT+HTTPACTION=0");
+                // LTE_cmd("AT+HTTPTERM");
+
+                // Kick Back
+                // terminal.print("-> answer ");
+                // terminal.println( sendSMS(msg.from, string2hex("Loud and clear,\nmy dude"), &readstr) ? readstr : "ERROR" ); 
+
+                count ++;
+            }
+            
+        } 
+        
+        String out;
+        serializeJson(data, out);
+        postJSON(URLSMSAPI, out);
+
+    }
     
 
     // if (M5.BtnA.wasPressed()) {

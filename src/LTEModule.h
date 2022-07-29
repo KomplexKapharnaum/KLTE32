@@ -475,88 +475,28 @@ bool recvSMS( struct SMS* message)
     return false;    
 }
 
-
-/////////////////// UNUSED
-
-uint16_t GetstrNumber(String Str, uint32_t* ptrbuff) {
-    uint16_t count = 0;
-    String Numberstr;
-    int indexpos = 0;
-    while (Str.length() > 0) {
-        indexpos = Str.indexOf(",");
-        if (indexpos != -1) {
-            Numberstr      = Str.substring(0, Str.indexOf(","));
-            Str            = Str.substring(Str.indexOf(",") + 1, Str.length());
-            ptrbuff[count] = Numberstr.toInt();
-            count++;
-        } else {
-            ptrbuff[count] = Str.toInt();
-            count++;
-            break;
-        }
-    }
-    return count;
-}
-vector<String> restr_v;
-uint16_t GetstrNumber(String StartStr, String EndStr, String Str) {
-    uint16_t count = 0;
-    String Numberstr;
-    int indexpos = 0;
-
-    Str = Str.substring(Str.indexOf(StartStr) + StartStr.length(),
-                        Str.indexOf(EndStr));
-    Str.trim();
-    restr_v.clear();
-
-    while (Str.length() > 0) {
-        indexpos = Str.indexOf(",");
-        if (indexpos != -1) {
-            Numberstr = Str.substring(0, Str.indexOf(","));
-            Str       = Str.substring(Str.indexOf(",") + 1, Str.length());
-            restr_v.push_back(Numberstr);
-            count++;
-        } else {
-            restr_v.push_back(Numberstr);
-            ;
-            count++;
-            break;
-        }
-    }
-    return count;
+int receivedSMS() 
+{
+    return new_sms.size();
 }
 
-String getReString(uint16_t Number) {
-    if (restr_v.empty()) {
-        return String("");
-    }
-    return restr_v.at(Number);
+
+/////////////////// HTTP
+
+bool postJSON(String url, String data)
+{
+    String newMsg;
+
+    LTE_cmd("AT+HTTPINIT");
+    LTE_cmd("AT+HTTPPARA=\"URL\",\""+url+"\"");
+    LTE_cmd("AT+HTTPPARA=\"CONTENT\",\"application/json\""); 
+    LTE_cmd("AT+HTTPDATA="+String(data.length())+",10", NULL, kPARTIAL_MT, 0, 10);
+    LTE_cmd(data);
+    LTE_cmd("AT+HTTPACTION=1", &newMsg);
+    LTE_cmd("AT+HTTPTERM");
+
+    Serial.println(argAt(newMsg, 1, "+HTTPACTION:"));
+    return (argAt(newMsg, 1, "+HTTPACTION:") == "200");
 }
-
-uint16_t GetstrNumber(String StartStr, String EndStr, String Str,
-                      uint32_t* ptrbuff) {
-    uint16_t count = 0;
-    String Numberstr;
-    int indexpos = 0;
-
-    Str = Str.substring(Str.indexOf(StartStr) + StartStr.length(),
-                        Str.indexOf(EndStr));
-    Str.trim();
-
-    while (Str.length() > 0) {
-        indexpos = Str.indexOf(",");
-        if (indexpos != -1) {
-            Numberstr      = Str.substring(0, Str.indexOf(","));
-            Str            = Str.substring(Str.indexOf(",") + 1, Str.length());
-            ptrbuff[count] = Numberstr.toInt();
-            count++;
-        } else {
-            ptrbuff[count] = Str.toInt();
-            count++;
-            break;
-        }
-    }
-    return count;
-}
-uint32_t numberbuff[128];
 
 ////////////////////////// END UNUSED
