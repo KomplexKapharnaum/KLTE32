@@ -6,6 +6,12 @@
 
 #include <ArduinoJson.h>
 
+#define K32_SET_NODEID 1      // board unique id
+#define K32_SET_CHANNEL 1     // board channel mqtt elp 1
+
+#include "k32_loader.h"
+
+
 TFT_eSprite Disbuff      = TFT_eSprite(&M5.Lcd);
 TFT_eSprite TerminalBuff = TFT_eSprite(&M5.Lcd);
 TFTTerminal terminal(&TerminalBuff);
@@ -34,6 +40,16 @@ void setup()
     TerminalBuff.pushSprite(0, 30);
     terminal.setGeometry(0, 30, 320, 210);
 
+    k32_setup();
+
+    // Heap Memory log
+    k32->timer->every(1000, []() {
+        static int lastheap = 0;
+        int heap = ESP.getFreeHeap();
+        LOGF2("Free memory: %d / %d\n", heap, heap - lastheap);
+        lastheap = heap;
+        if (heap < 50000) LOGF2("WARNING: free memory < 50K, new task might not properly start. %d / %d\n", heap, heap - lastheap);
+    });
 
     // START LTE MODULE
     terminal.print("Starting ");
@@ -130,8 +146,13 @@ void loop()
     {
         // terminal.print("Calling MGR ");
         // terminal.println( LTE_cmd("ATD0675471820;", &readstr) ? readstr : "ERROR" );
-        terminal.print("Send SMS mano ");
-        terminal.println( sendSMS( string2hex("0675471820") , string2hex("yo"), &readstr) ? readstr : "ERROR" );
+        // terminal.print("Send SMS mano ");
+        // terminal.println( sendSMS( string2hex("0675471820") , string2hex("yo"), &readstr) ? readstr : "ERROR" );
+
+        if (mqtt && mqtt->isConnected()) 
+            mqtt->publish("rpi/all/playtext", "004F006B0020D83CDF00§UCS2");
+        else 
+            terminal.println("-> MQTT not connected ");
     }
 
     // SMS
@@ -157,6 +178,7 @@ void loop()
         // String data = "{\"from\": \"+33675471820\", \"text\": \"Yeah\"}";
 
         DynamicJsonDocument data( 200*receivedSMS() );
+        data["enc"] = "UCS2";
 
         struct SMS msg;
         int count = 0;
@@ -182,14 +204,14 @@ void loop()
                 terminal.println( hex2string(msg.from) );    
                 terminal.println( hex2string(msg.msg) );
 
-                // Forward to Relay
-                data["sms"][count]["from"] = hex2string(msg.from);
-                data["sms"][count]["text"] = hex2string(msg.msg);
+                // Append to Relay payload
+                data["sms"][count]["from"] = msg.from;
+                data["sms"][count]["text"] = msg.msg;
 
-                // LTE_cmd("AT+HTTPINIT");
-                // LTE_cmd("AT+HTTPPARA=\"URL\",\"https://relay.kxkm.net/relay/api/sms\"");
-                // LTE_cmd("AT+HTTPACTION=0");
-                // LTE_cmd("AT+HTTPTERM");
+                // Forward to MQTT
+                if (mqtt && mqtt->isConnected()) 
+                    mqtt->publish("rpi/all/playtext", (msg.msg+"§UCS2").c_str());
+                else terminal.println("-> MQTT not connected ");
 
                 // Kick Back
                 // terminal.print("-> answer ");
@@ -200,9 +222,10 @@ void loop()
             
         } 
         
+        // Send to Relay
         String out;
         serializeJson(data, out);
-        postJSON(URLSMSAPI, out);
+        postJSON(URLSMSAPI, out);   // Send to https://relay.kxkm.net/relay/api/sms
 
     }
     
