@@ -17,6 +17,7 @@ TFT_eSprite TerminalBuff = TFT_eSprite(&M5.Lcd);
 TFTTerminal terminal(&TerminalBuff);
 
 String readstr;
+String myNumber;
 
 String URLSMSAPI = "https://relay.kxkm.net/relay/api/multisms";
 
@@ -86,8 +87,9 @@ void setup()
     // terminal.println( LTE_cmd("AT+COPS?", &readstr) ? stringAt(readstr, 2) : "ERROR" );
 
     // CHECK NUMBER
-    // terminal.print("My Number: ");
-    // terminal.println( LTE_cmd("AT+CNUM", &readstr) ? stringAt(readstr, 1) : "ERROR" );
+    terminal.print("My Number: ");
+    terminal.println( LTE_cmd("AT+CNUM", &readstr) ? argAt(readstr, 1) : "ERROR" );
+    myNumber = argAt(readstr, 1);
 
     // SMS TEXT
     terminal.print("SMS mode text ");
@@ -149,8 +151,12 @@ void loop()
         // terminal.print("Send SMS mano ");
         // terminal.println( sendSMS( string2hex("0675471820") , string2hex("yo"), &readstr) ? readstr : "ERROR" );
 
+        // terminal.print("Send SMS0 ");
+        // terminal.println( sendSMS( string2hex("+33675471820") , 0, &readstr) ? readstr : "ERROR" );   // D83EDD50
+
+        terminal.println("send SMS 0 (+SMS0)");
         if (mqtt && mqtt->isConnected()) 
-            mqtt->publish("rpi/all/playtext", "004F006B0020D83CDF00§UCS2");
+            mqtt->publish("rpi/all/sms", (recallSMS(0)+"§UCS2").c_str());
         else 
             terminal.println("-> MQTT not connected ");
     }
@@ -158,8 +164,11 @@ void loop()
     // SMS
     if (M5.BtnB.wasPressed()) 
     {
-        terminal.print("Send SMS0 ");
-        terminal.println( sendSMS( string2hex("+33675471820") , 0, &readstr) ? readstr : "ERROR" );   // D83EDD50
+        terminal.println("Clear RPI");
+        if (mqtt && mqtt->isConnected()) 
+            mqtt->publish("rpi/all/smsclear", myNumber.c_str());
+        else 
+            terminal.println("-> MQTT not connected ");
     }
 
     // Get RSSI
@@ -197,6 +206,9 @@ void loop()
 
                 Serial.println("Storing "+String(mem)+" : "+hex2string(msgstore));
                 storeSMS(msgstore, mem);
+
+                terminal.print("Store ");    
+                terminal.println( hex2string(msg.msg) );  
             }
             else 
             {
@@ -209,8 +221,7 @@ void loop()
                 data["sms"][count]["text"] = msg.msg;
 
                 // Forward to MQTT
-                if (mqtt && mqtt->isConnected()) 
-                    mqtt->publish("rpi/all/playtext", (msg.msg+"§UCS2").c_str());
+                if (mqtt && mqtt->isConnected()) mqtt->publish("rpi/random/sms", (msg.msg+"§UCS2").c_str());
                 else terminal.println("-> MQTT not connected ");
 
                 // Kick Back

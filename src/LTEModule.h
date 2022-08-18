@@ -410,6 +410,15 @@ String hex2string(String str)
 
 //////////////////// ACTIONS
 
+void storeSMS(String msg, int mem)   
+{
+  storage.putString( ("SMS"+String(mem)).c_str() , msg);
+}
+
+String recallSMS(int mem) {
+    return storage.getString( ("SMS"+String(mem)).c_str() , "-");
+}
+
 bool sendSMS(String to, String msg, String *value = NULL)
 {
   bool res = false;
@@ -423,15 +432,11 @@ bool sendSMS(String to, String msg, String *value = NULL)
 
 bool sendSMS(String to, int mem, String *value = NULL)
 {
-  String msg = storage.getString( ("SMS"+String(mem)).c_str() , "?");
+  String msg = recallSMS(mem);
   return sendSMS(to, msg, value);
 }
 
 
-void storeSMS(String msg, int mem)   
-{
-  storage.putString( ("SMS"+String(mem)).c_str() , msg);
-}
 
 bool pullSMS() 
 {   
