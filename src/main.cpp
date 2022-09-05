@@ -21,6 +21,9 @@ String myNumber;
 
 String URLSMSAPI = "https://relay.kxkm.net/relay/api/multisms";
 
+unsigned long lastRSSI = 0;
+bool relayMQTT = false;
+
 void setup() 
 {
     // put your setup code here, to run once:
@@ -143,30 +146,38 @@ void loop()
     delay(100);
     M5.update();
 
+    // RSSI
+    if (millis() - lastRSSI > 10000) {
+        terminal.println("CSQ rssi: " + (LTE_cmd("AT+CSQ", &readstr) ? argAt(readstr, 0) : "0") );
+        lastRSSI = millis();
+    }
+
     // DIAL
     if (M5.BtnA.wasPressed()) 
     {
-        // terminal.print("Calling MGR ");
-        // terminal.println( LTE_cmd("ATD0675471820;", &readstr) ? readstr : "ERROR" );
+        terminal.print("Calling NICO ");
+        terminal.println( LTE_cmd("ATD0662064246;", &readstr) ? readstr : "ERROR" );
         // terminal.print("Send SMS mano ");
         // terminal.println( sendSMS( string2hex("0675471820") , string2hex("yo"), &readstr) ? readstr : "ERROR" );
 
         // terminal.print("Send SMS0 ");
         // terminal.println( sendSMS( string2hex("+33675471820") , 0, &readstr) ? readstr : "ERROR" );   // D83EDD50
 
-        terminal.println("send SMS 0 (+SMS0)");
-        if (mqtt && mqtt->isConnected()) 
-            mqtt->publish("rpi/all/sms", (recallSMS(0)+"§UCS2").c_str());
-        else 
-            terminal.println("-> MQTT not connected ");
+        // terminal.println("send SMS 0 (+SMS0)");
+        // if (mqtt && mqtt->isConnected()) 
+        //     mqtt->publish("rpi/all/sms", (recallSMS(0)+"§UCS2").c_str());
+        // else 
+        //     terminal.println("-> MQTT not connected ");
     }
 
     // SMS
     if (M5.BtnB.wasPressed()) 
     {
         terminal.println("Clear RPI");
-        if (mqtt && mqtt->isConnected()) 
-            mqtt->publish("rpi/all/smsclear", myNumber.c_str());
+        if (mqtt && mqtt->isConnected()) {
+            mqtt->publish("rpi/casa/textall", myNumber.c_str());
+            mqtt->publish("rpi/mgr-ux/textall", myNumber.c_str());
+        }
         else 
             terminal.println("-> MQTT not connected ");
     }
@@ -174,7 +185,9 @@ void loop()
     // Get RSSI
     if (M5.BtnC.wasPressed()) 
     {
-        terminal.println("CSQ rssi: " + (LTE_cmd("AT+CSQ", &readstr) ? argAt(readstr, 0) : "0") );
+        relayMQTT = !relayMQTT;
+        terminal.print("MQTT relay: ");
+        terminal.println(relayMQTT ? "YES" : "NO");
     }
 
     // CHECK NEW MESSAGE
@@ -220,15 +233,21 @@ void loop()
                 data["sms"][count]["from"] = msg.from;
                 data["sms"][count]["text"] = msg.msg;
 
+                count ++;
+
                 // Forward to MQTT
-                if (mqtt && mqtt->isConnected()) mqtt->publish("rpi/random/sms", (msg.msg+"§UCS2").c_str());
-                else terminal.println("-> MQTT not connected ");
+                if (relayMQTT)
+                    if (mqtt && mqtt->isConnected()) {
+                        mqtt->publish("rpi/casa/textdispatch", (msg.msg+"§UCS2").c_str());
+                        mqtt->publish("rpi/mgr-ux/textdispatch", (msg.msg+"§UCS2").c_str());
+                    }
+                    else terminal.println("-> MQTT not connected ");
 
                 // Kick Back
                 // terminal.print("-> answer ");
                 // terminal.println( sendSMS(msg.from, string2hex("Loud and clear,\nmy dude"), &readstr) ? readstr : "ERROR" ); 
 
-                count ++;
+                
             }
             
         } 
@@ -236,28 +255,9 @@ void loop()
         // Send to Relay
         String out;
         serializeJson(data, out);
-        postJSON(URLSMSAPI, out);   // Send to https://relay.kxkm.net/relay/api/sms
-
+        terminal.print("-> Relay 4G: ");
+        bool relayPost = postJSON(URLSMSAPI, out);   // Send to https://relay.kxkm.net/relay/api/sms
+        terminal.println((relayPost)?"OK":"FAILED");
     }
     
-
-    // if (M5.BtnA.wasPressed()) {
-    //     restate = AddMsg("ATD13800088888;");
-    //     while ((readSendState(0) == kSendReady) ||
-    //            (readSendState(0) == kSending) ||
-    //            (readSendState(0) == kWaitforMsg))
-    //         delay(50);
-    //     Serial.printf("Read state = %d \n", readSendState(0));
-    //     readstr = ReadMsgstr(0).c_str();
-    //     Serial.print(readstr);
-    //     while (1) {
-    //         M5.update();
-    //         if (M5.BtnA.wasPressed()) break;
-    //         delay(100);
-    //     }
-    //     EraseFirstMsg();
-    //     restate = AddMsg("AT+CHUP", kASSIGN_MO);
-    // }
-
-    // put your main code here, to run repeatedly:
 }
